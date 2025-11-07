@@ -30,6 +30,19 @@ make
 ./hello
 ```
 
+#### Option D: Desktop (Windows)
+```batch
+git clone https://github.com/konnorreynolds/RobotLib.git
+cd RobotLib\examples
+build.bat
+.\build\bin\Release\fluent_08_hello_units.exe
+```
+
+**Requirements:**
+- Visual Studio 2017+ with C++ tools, OR
+- MinGW-w64 (g++)
+- CMake (optional, auto-detected by build.bat)
+
 ---
 
 ### Step 2: Your First Program (2 minutes)
@@ -64,10 +77,29 @@ int main() {
 
 ### Step 3: Compile & Run (1 minute)
 
-#### Desktop:
+#### Desktop (Linux/macOS):
 ```bash
 g++ -std=c++11 -I./include first_program.cpp -o first
 ./first
+```
+
+#### Desktop (Windows - Command Prompt):
+```batch
+REM With MSVC:
+cl /std:c++11 /EHsc /I..\include first_program.cpp
+first.exe
+
+REM With MinGW:
+g++ -std=c++11 -I../include first_program.cpp -o first.exe
+first.exe
+```
+
+#### Desktop (Windows - Easy Way):
+Copy `first_program.cpp` to `examples/06_fluent_api/` and run:
+```batch
+cd examples
+build.bat
+.\build\bin\Release\fluent_01_first_program.exe
 ```
 
 #### Arduino:
@@ -408,6 +440,21 @@ g++ -I./include ...  # Add include path
 1. Verify library is in `Arduino/libraries/RobotLib/`
 2. Restart Arduino IDE
 3. Check board selection
+
+### Windows: "No C++ compiler found!"
+**Solution:**
+1. Install Visual Studio 2017+ with "Desktop development with C++"
+   - OR install MinGW-w64: https://www.mingw-w64.org/
+2. Open "Developer Command Prompt for VS" (for MSVC)
+   - OR add MinGW to PATH: `set PATH=C:\mingw-w64\bin;%PATH%`
+3. Run `build.bat` again
+
+### Windows: CMake not found
+**Solution:**
+1. Install CMake: https://cmake.org/download/
+2. Add to PATH during installation
+3. Restart Command Prompt
+4. Run `build.bat` again
 
 ### Motors don't respond
 **Check:**
