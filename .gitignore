@@ -207,3 +207,33 @@ callgrind.out.*
 !docs/**/*.md
 !docs/**/*.png
 !docs/**/*.jpg
+
+# Benchmark outputs
+benchmarks/results/
+*.bench
+
+# Example compiled binaries (commonly named)
+examples/diff_drive
+examples/ex[0-9]*
+examples/fluent_demo
+examples/hello
+examples/motor_control
+examples/mpc
+examples/mpc_test
+examples/omni_robot
+examples/quad_nav
+examples/quadcopter
+
+# Clang-tidy
+.clang-tidy
+compile_commands.json
+
+# Sanitizer outputs
+*.asan
+*.tsan
+*.ubsan
+
+# Core dumps
+core
+core.*
+*.core

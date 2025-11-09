@@ -22,7 +22,8 @@
 //
 // Version: 2.2
 // C++ Standard: C++11 or newer
-// License: [Your License]
+// License: MIT
+// SPDX-License-Identifier: MIT
 // ============================================================================
 
 #ifndef ROBOTLIB_H

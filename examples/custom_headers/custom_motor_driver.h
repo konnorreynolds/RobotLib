@@ -14,9 +14,10 @@
 // PATTERN:
 //   1. Include RobotLib headers for units and utilities
 //   2. Define your motor driver class
-//   3. Store configuration (gear ratio, limits, etc.)
+//   3. Store configuration (gear ratio, limits, sleep pin, etc.)
 //   4. Provide type-safe interface using RobotLib units
-//   5. Translate to hardware-specific commands internally
+//   5. Use fluent API for chainable configuration
+//   6. Translate to hardware-specific commands internally
 //
 // ============================================================================
 
@@ -30,15 +31,30 @@
 // EXAMPLE 1: Simple PWM Motor Driver
 // ============================================================================
 // Wraps basic PWM motor control (like L298N, TB6612, etc.)
+// Supports two wiring modes:
+//   1. PWM + DIR mode: One PWM pin for speed, one digital pin for direction
+//   2. Dual PWM mode: Two PWM pins (one for forward, one for reverse)
 // ============================================================================
 class SimplePWMMotor {
+public:
+    // ========================================================================
+    // Drive Mode Enumeration
+    // ========================================================================
+    enum DriveMode {
+        PWM_DIR,     // PWM + Direction pin (most common)
+        DUAL_PWM     // Two PWM pins (locked anti-phase / sign-magnitude)
+    };
+
 private:
     // ========================================================================
     // Hardware Configuration
     // ========================================================================
-    int pwm_pin_;        // PWM pin for speed control (0-255)
-    int dir_pin_;        // Direction pin (HIGH/LOW)
+    int pwm_pin_a_;      // PWM pin A (speed in PWM_DIR mode, forward in DUAL_PWM)
+    int pwm_pin_b_;      // PWM pin B (direction in PWM_DIR mode, reverse in DUAL_PWM)
+    int sleep_pin_;      // Sleep/standby pin (optional, -1 if unused)
+    DriveMode mode_;     // Current drive mode
     bool inverted_;      // Reverse direction if true
+    bool sleep_enabled_; // Current sleep state (true = sleeping/low power)
 
     // ========================================================================
     // Motor Characteristics (type-safe units!)
@@ -54,28 +70,37 @@ private:
 
 public:
     // ========================================================================
-    // Constructor
+    // Constructor - PWM + DIR mode (default)
     // ========================================================================
     // PARAMETERS:
-    //   pwm_pin: Arduino PWM pin (must support analogWrite)
-    //   dir_pin: Digital pin for direction
+    //   pwm_pin: Arduino PWM pin for speed control (must support analogWrite)
+    //   dir_pin: Digital pin for direction (HIGH/LOW)
     //   max_rpm: Motor's free speed in RPM
     //   gear_ratio: Gearbox reduction (output/input)
+    //
+    // CREATES: Motor driver in PWM + DIR mode (most common configuration)
     //
     SimplePWMMotor(int pwm_pin, int dir_pin,
                    const units::RPM& max_rpm,
                    double gear_ratio = 1.0)
-        : pwm_pin_(pwm_pin)
-        , dir_pin_(dir_pin)
+        : pwm_pin_a_(pwm_pin)
+        , pwm_pin_b_(dir_pin)
+        , sleep_pin_(-1)
+        , mode_(PWM_DIR)
         , inverted_(false)
+        , sleep_enabled_(false)
         , max_rpm_(max_rpm)
         , gear_ratio_(gear_ratio)
         , stall_torque_(units::Newtons::fromNewtons(1.0))
         , current_duty_cycle_(0.0)
     {
         // Hardware initialization would go here
-        // pinMode(pwm_pin_, OUTPUT);
-        // pinMode(dir_pin_, OUTPUT);
+        // pinMode(pwm_pin_a_, OUTPUT);
+        // pinMode(pwm_pin_b_, OUTPUT);
+        // if (sleep_pin_ >= 0) {
+        //     pinMode(sleep_pin_, OUTPUT);
+        //     digitalWrite(sleep_pin_, HIGH);  // Wake up by default
+        // }
     }
 
     // ========================================================================
@@ -90,7 +115,7 @@ public:
     //   1. Clamps duty cycle to safe range
     //   2. Determines direction from sign
     //   3. Converts to PWM value (0-255)
-    //   4. Writes to hardware pins
+    //   4. Writes to hardware pins based on drive mode
     //
     void setDutyCycle(double duty_cycle) {
         // Safety: clamp to valid range
@@ -105,10 +130,25 @@ public:
         int pwm_value = static_cast<int>(std::abs(duty_cycle) * 255);
 
         // ====================================================================
-        // HARDWARE-SPECIFIC CODE GOES HERE
+        // HARDWARE-SPECIFIC CODE - Mode dependent
         // ====================================================================
-        // digitalWrite(dir_pin_, forward ? HIGH : LOW);
-        // analogWrite(pwm_pin_, pwm_value);
+        if (mode_ == PWM_DIR) {
+            // PWM + DIR mode: One PWM for speed, one digital for direction
+            // digitalWrite(pwm_pin_b_, forward ? HIGH : LOW);  // Direction
+            // analogWrite(pwm_pin_a_, pwm_value);              // Speed
+        }
+        else if (mode_ == DUAL_PWM) {
+            // Dual PWM mode: Two PWM pins (forward and reverse)
+            if (forward) {
+                // Forward: PWM on pin A, pin B off
+                // analogWrite(pwm_pin_a_, pwm_value);  // Forward PWM
+                // analogWrite(pwm_pin_b_, 0);          // Reverse off
+            } else {
+                // Reverse: PWM on pin B, pin A off
+                // analogWrite(pwm_pin_a_, 0);          // Forward off
+                // analogWrite(pwm_pin_b_, pwm_value);  // Reverse PWM
+            }
+        }
     }
 
     // ========================================================================
@@ -156,12 +196,119 @@ public:
     double getDutyCycle() const { return current_duty_cycle_; }
     units::RPM getMaxRPM() const { return max_rpm_; }
     double getGearRatio() const { return gear_ratio_; }
+    DriveMode getDriveMode() const { return mode_; }
+    bool isDualPWM() const { return mode_ == DUAL_PWM; }
+    bool isPWMDir() const { return mode_ == PWM_DIR; }
+    int getPinA() const { return pwm_pin_a_; }
+    int getPinB() const { return pwm_pin_b_; }
 
     // ========================================================================
     // CONFIGURATION
     // ========================================================================
     void setInverted(bool inverted) { inverted_ = inverted; }
     void setStallTorque(const units::Newtons& torque) { stall_torque_ = torque; }
+
+    // ========================================================================
+    // FLUENT API - Configure sleep pin (chainable)
+    // ========================================================================
+    // WHAT THIS IS FOR:
+    //   Many H-bridge motor drivers (TB6612FNG, DRV8833, etc.) have a sleep
+    //   or standby pin that puts the driver into low-power mode.
+    //
+    // USAGE:
+    //   SimplePWMMotor motor(9, 8, rpm(200));
+    //   motor.withSleepPin(7);  // Sleep pin on digital pin 7
+    //
+    // FLUENT USAGE:
+    //   SimplePWMMotor motor(9, 8, rpm(200));
+    //   motor.withSleepPin(7).setInverted(true);  // Chain multiple configs!
+    //
+    SimplePWMMotor& withSleepPin(int sleep_pin) {
+        sleep_pin_ = sleep_pin;
+
+        // Hardware initialization would go here
+        // pinMode(sleep_pin_, OUTPUT);
+        // digitalWrite(sleep_pin_, HIGH);  // Wake up by default
+
+        return *this;  // Enable method chaining
+    }
+
+    // ========================================================================
+    // FLUENT API - Configure dual PWM mode (chainable)
+    // ========================================================================
+    // WHAT THIS IS FOR:
+    //   Some motor driver configurations use two PWM pins instead of PWM+DIR:
+    //   - One PWM pin controls forward speed
+    //   - Other PWM pin controls reverse speed
+    //   - Common in: L298N (when used in dual PWM mode), some custom H-bridges
+    //
+    // WHEN TO USE:
+    //   - Your hardware has two PWM inputs (IN1/IN2 or INA/INB)
+    //   - You want independent forward/reverse control
+    //   - "Locked anti-phase" or "sign-magnitude" drive mode
+    //
+    // USAGE:
+    //   SimplePWMMotor motor(9, 10, rpm(200));  // Both pins as PWM
+    //   motor.withDualPWM();  // Switch to dual PWM mode
+    //
+    // FLUENT USAGE:
+    //   SimplePWMMotor motor(9, 10, rpm(200));
+    //   motor.withDualPWM().withSleepPin(7).setInverted(false);  // Chain!
+    //
+    // AFTER CALLING THIS:
+    //   - pwm_pin_a_ (pin 9) controls forward
+    //   - pwm_pin_b_ (pin 10) controls reverse
+    //   - setDutyCycle() will use dual PWM logic
+    //
+    SimplePWMMotor& withDualPWM() {
+        mode_ = DUAL_PWM;
+
+        // Hardware initialization for dual PWM
+        // Both pins should already be set as OUTPUT from constructor
+        // pinMode(pwm_pin_a_, OUTPUT);  // Forward PWM
+        // pinMode(pwm_pin_b_, OUTPUT);  // Reverse PWM
+        // analogWrite(pwm_pin_a_, 0);   // Start stopped
+        // analogWrite(pwm_pin_b_, 0);
+
+        return *this;  // Enable method chaining
+    }
+
+    // ========================================================================
+    // SLEEP MODE CONTROL
+    // ========================================================================
+    // Enable sleep mode (low power, motor driver disabled)
+    // TYPICAL BEHAVIOR:
+    //   - TB6612FNG: STBY pin LOW = sleep, HIGH = active
+    //   - DRV8833: nSLEEP pin LOW = sleep, HIGH = active
+    //
+    void enableSleep() {
+        if (sleep_pin_ >= 0) {
+            sleep_enabled_ = true;
+            // digitalWrite(sleep_pin_, LOW);  // Put driver to sleep
+        }
+    }
+
+    // Disable sleep mode (wake up motor driver)
+    void disableSleep() {
+        if (sleep_pin_ >= 0) {
+            sleep_enabled_ = false;
+            // digitalWrite(sleep_pin_, HIGH);  // Wake up driver
+        }
+    }
+
+    // Toggle sleep state
+    void toggleSleep() {
+        if (sleep_enabled_) {
+            disableSleep();
+        } else {
+            enableSleep();
+        }
+    }
+
+    // Query sleep state
+    bool isSleeping() const { return sleep_enabled_; }
+    bool hasSleepPin() const { return sleep_pin_ >= 0; }
+    int getSleepPin() const { return sleep_pin_; }
 
     // ========================================================================
     // STOP - Emergency stop
@@ -341,6 +488,39 @@ int main() {
     drive_motor.setDutyCycle(0.5);       // 50% forward
     drive_motor.setVelocity(rpm(100));   // Run at 100 RPM
     drive_motor.stop();                  // Emergency stop
+
+    // Sleep pin configuration (for TB6612FNG, DRV8833, etc.)
+    drive_motor.withSleepPin(7);         // Configure sleep pin on digital 7
+    drive_motor.disableSleep();          // Wake up motor driver
+    drive_motor.setDutyCycle(0.5);       // Motor can now run
+    drive_motor.enableSleep();           // Put driver to sleep (low power)
+
+    // Fluent API chaining
+    SimplePWMMotor left_motor(10, 11, rpm(150));
+    left_motor.withSleepPin(6).setInverted(true);  // Chain multiple configs!
+
+    // ------------------------------------------------------------------------
+    // Example 1b: Dual PWM Motor (two PWM pins)
+    // ------------------------------------------------------------------------
+    // Some motor drivers use two PWM pins instead of PWM+DIR
+    // Examples: L298N in dual PWM mode, some custom H-bridges
+    SimplePWMMotor dual_motor(5, 6,     // Both pins 5 and 6 are PWM capable
+                              rpm(180),  // Max 180 RPM
+                              10.0);     // 10:1 gear ratio
+
+    dual_motor.withDualPWM();            // Enable dual PWM mode
+    dual_motor.setDutyCycle(0.7);        // 70% forward (PWM on pin 5)
+    dual_motor.setDutyCycle(-0.5);       // 50% reverse (PWM on pin 6)
+
+    // Check drive mode
+    if (dual_motor.isDualPWM()) {
+        // Motor is in dual PWM mode
+        // Pin A (5) = forward, Pin B (6) = reverse
+    }
+
+    // Fluent chaining with dual PWM
+    SimplePWMMotor right_motor(3, 11, rpm(180), 10.0);
+    right_motor.withDualPWM().withSleepPin(4).setInverted(false);  // All in one!
 
     // ------------------------------------------------------------------------
     // Example 2: CAN Motor

@@ -22,7 +22,7 @@
 
 // Version information
 #define ROBOTICS_UNITS_VERSION_MAJOR 2
-#define ROBOTICS_UNITS_VERSION_MINOR 1
+#define ROBOTICS_UNITS_VERSION_MINOR 2
 #define ROBOTICS_UNITS_VERSION_PATCH 0
 
 // Platform detection
